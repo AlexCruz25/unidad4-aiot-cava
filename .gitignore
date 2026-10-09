@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Variables privadas
+.env
+
+# VS Code
+.vscode/
+
+# Herramientas y configuraciones privadas
+.agents/
+.aws/
+.codex/
+
+# Sistema operativo
+.DS_Store
+Thumbs.db
+
+# Arduino
+*.bin
+
+# Logs
+*.log
