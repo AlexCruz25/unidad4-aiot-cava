@@ -21,6 +21,7 @@ Thumbs.db
 
 # Arduino
 *.bin
+secrets.h
 
 # Logs
 *.log
