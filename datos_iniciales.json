@@ -1,0 +1,22 @@
+{
+  "bodega": {
+    "zona_crianza": {
+      "ambiente": {
+        "temperatura": 16.0,
+        "humedad": 70.0,
+        "timestamp": 0
+      },
+      "control": {
+        "extractor_solicitado": false,
+        "origen": "manual"
+      },
+      "extractor_confirmado": false,
+      "supervisor": {
+        "alerta_calidad": false,
+        "forzar_climatizacion": false,
+        "impacto_enologico": "Condiciones normales",
+        "ultima_evaluacion": "Sin evaluacion"
+      }
+    }
+  }
+}
