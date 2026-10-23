@@ -6,20 +6,20 @@
  * Sensor: DHT22 SIMULADO; GPIO 4 reservado para el sensor físico
  * Actuador/LED: GPIO 2
  *
- * PASOS 3 y 4: simulación y telemetría ejecutadas en el ESP32 físico.
+ * PASOS 3, 4 y 5: simulación, telemetría y órdenes reactivas en el ESP32.
  * - Escenarios de temperatura y humedad seleccionables por serie.
  * - Validación de lecturas con isnan().
  * - Temporización no bloqueante con millis(), cada 2500 ms.
  * - Control manual del climatizador mediante GPIO 2.
  * - Wi-Fi con reintentos temporizados y sincronización de hora por NTP.
  * - HTTPS PATCH a Firebase cada 5000 ms, con validación TLS por CA.
+ * - Streaming SSE persistente con cliente TLS exclusivo para órdenes.
  *
  * Futuras funciones:
  * - Lectura del DHT22 físico.
- * - Recepción de eventos SSE desde Firebase.
  * - Acknowledge mediante HTTPS PUT.
  *
- * Las órdenes remotas y su confirmación quedan para siguientes etapas.
+ * La confirmación remota queda para el PASO 6.
  */
 
 #include <Arduino.h>
@@ -35,6 +35,7 @@
 
 #include "secrets.h"
 #include "firebase_ca.h"
+#include "firebase_sse.h"
 
 #define MODO_SIMULACION true
 
@@ -53,6 +54,9 @@ const time_t HORA_MINIMA_VALIDA = 1704067200;  // 2024-01-01 UTC.
 const char FIREBASE_URL[] =
     "https://unidad4-aiot-cava-default-rtdb.firebaseio.com"
     "/bodega/zona_crianza/ambiente.json";
+const char FIREBASE_SSE_URL[] =
+    "https://unidad4-aiot-cava-default-rtdb.firebaseio.com"
+    "/bodega/zona_crianza/control/extractor_solicitado.json";
 
 // Las colas copian los datos; la tarea HTTPS no accede a las lecturas globales.
 struct LecturaAmbiental {
@@ -79,6 +83,7 @@ bool intentoWiFiIniciado = false;
 bool ntpIniciado = false;
 bool horaConfirmada = false;
 bool envioEnCurso = false;
+bool actuadorEncendido = false;
 QueueHandle_t colaLecturas = nullptr;
 QueueHandle_t colaResultados = nullptr;
 
@@ -98,6 +103,7 @@ String construirJson(const LecturaAmbiental& lectura);
 ResultadoEnvio enviarTelemetria(const LecturaAmbiental& lectura);
 void tareaFirebase(void* parametro);
 void procesarResultadoEnvio();
+void procesarEventosSse();
 
 void setup() {
   // El LED integrado representa el climatizador si está conectado a GPIO 2.
@@ -112,6 +118,12 @@ void setup() {
   seleccionarEscenario(1);
   iniciarConectividad();
   iniciarTareaFirebase();
+  const ConfiguracionSse configuracionSse = {
+      FIREBASE_SSE_URL, FIREBASE_ROOT_CA, HORA_MINIMA_VALIDA,
+      TIMEOUT_CONEXION_MS, TIMEOUT_HTTP_MS, TIMEOUT_TLS_SEGUNDOS};
+  if (!iniciarSse(configuracionSse)) {
+    Serial.println("[SSE] Sin memoria para iniciar streaming; control local y PATCH activos");
+  }
   ultimaLectura = millis();
   ultimoEnvio = ultimaLectura;
 }
@@ -124,6 +136,7 @@ void loop() {
   gestionarWiFi(ahora);
   sincronizarHora(ahora);
   procesarResultadoEnvio();
+  procesarEventosSse();
   // La resta sin signo conserva el intervalo al desbordarse millis().
   if (ahora - ultimaLectura >= INTERVALO_LECTURA) {
     ultimaLectura = ahora;
@@ -251,9 +264,25 @@ void mostrarTelemetria() {
 }
 
 void controlarActuador(bool encender) {
-  digitalWrite(ACTUATOR_PIN, encender ? HIGH : LOW);
+  if (actuadorEncendido != encender) {
+    digitalWrite(ACTUATOR_PIN, encender ? HIGH : LOW);
+    actuadorEncendido = encender;
+  }
   Serial.print("[ACTUADOR] GPIO 2 = ");
   Serial.println(encender ? "ON" : "OFF");
+}
+
+void procesarEventosSse() {
+  char aviso[144];
+  for (unsigned i = 0; i < 8 && recibirAvisoSse(aviso, sizeof(aviso)); ++i) {
+    Serial.println(aviso);
+  }
+  bool encender;
+  if (recibirOrdenSse(encender)) {
+    Serial.println(encender ? "[SSE] Orden recibida: ENCENDER" : "[SSE] Orden recibida: APAGAR");
+    // El estado inicial y cada evento válido pasan por el mismo control local.
+    controlarActuador(encender);
+  }
 }
 
 void mostrarMenu() {
