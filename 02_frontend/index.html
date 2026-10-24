@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="es-AR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#173f35">
+  <meta name="description" content="Monitoreo ambiental y control del climatizador de la zona de crianza de la Cava Inteligente.">
+  <title>Cava Inteligente — Sistema AIoT</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23173f35'/%3E%3Cpath d='M9 8h14v7a7 7 0 0 1-14 0zm7 14v5m-5 0h10' fill='none' stroke='%23e1e8bb' stroke-width='2'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="./styles.css">
+  <script type="module" src="./app.js"></script>
+</head>
+<body>
+  <a class="skip-link" href="#contenido">Ir al contenido</a>
+  <svg class="icon-library" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+    <symbol id="i-wine" viewBox="0 0 24 24"><path d="M6 3h12v6a6 6 0 0 1-12 0zm6 12v6m-4 0h8M6 7h12"/></symbol>
+    <symbol id="i-grid" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></symbol>
+    <symbol id="i-thermo" viewBox="0 0 24 24"><path d="M9 14.5V5a3 3 0 0 1 6 0v9.5a5 5 0 1 1-6 0ZM12 8v9"/><circle cx="12" cy="18" r="1.5"/></symbol>
+    <symbol id="i-drop" viewBox="0 0 24 24"><path d="M12 2S5 10 5 14a7 7 0 0 0 14 0c0-4-7-12-7-12Zm-3 13a3 3 0 0 0 3 3"/></symbol>
+    <symbol id="i-power" viewBox="0 0 24 24"><path d="M12 2v10M6.3 5.5a9 9 0 1 0 11.4 0"/></symbol>
+    <symbol id="i-fan" viewBox="0 0 24 24"><circle cx="12" cy="12" r="2"/><path d="M11 10C5 7 8 1 12 3c3 1 2 5 1 7m1 1c3-6 9-3 7 1-1 3-5 2-7 1m-1 1c6 3 3 9-1 7-3-1-2-5-1-7m-1-1c-3 6-9 3-7-1 1-3 5-2 7-1"/></symbol>
+    <symbol id="i-shield" viewBox="0 0 24 24"><path d="m12 2 8 3v6c0 5-8 11-8 11S4 16 4 11V5Zm-4 9 3 3 5-6"/></symbol>
+    <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
+    <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M4 12h16m-6-6 6 6-6 6"/></symbol>
+    <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v6m0-10v.5"/></symbol>
+  </svg>
+
+  <aside class="sidebar" aria-label="Navegación del dashboard">
+    <a class="brand" href="#contenido" aria-label="Cava Inteligente, inicio">
+      <span class="brand-mark"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-wine"/></svg></span>
+      <span>CAVA<span class="brand-sub">INTELIGENTE</span></span>
+    </a>
+    <p class="nav-label">CENTRO DE OPERACIONES</p>
+    <nav>
+      <a class="nav-link active" href="#ambiente"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-grid"/></svg>Monitoreo ambiental</a>
+      <a class="nav-link" href="#climatizador"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-fan"/></svg>Climatizador</a>
+      <a class="nav-link" href="#supervision"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-shield"/></svg>Supervisión AIoT</a>
+    </nav>
+    <div class="sidebar-note"><span class="sidebar-dot"></span>Zona de crianza<span>Arquitectura AIoT<br>Unidad 4 · Proyecto integrador</span></div>
+  </aside>
+
+  <main id="contenido" class="main" tabindex="-1">
+    <header class="page-header">
+      <div><p class="eyebrow">BODEGA / ZONA DE CRIANZA</p><h1>Cava Inteligente <span>— Sistema AIoT</span></h1><p class="subtitle">Monitoreo y control ambiental de la zona de crianza</p></div>
+      <div id="connection-badge" class="badge connection" data-tone="muted" role="status"><span class="status-dot"></span><span id="connection-text">Conectando con Firebase…</span></div>
+    </header>
+    <noscript><p class="notice" data-tone="danger">Este dashboard requiere JavaScript para conectarse a Firebase. Activá JavaScript y recargá la página.</p></noscript>
+    <p id="app-error" class="notice" data-tone="danger" role="alert" hidden></p>
+    <p id="connection-warning" class="notice" data-tone="warning" role="status" hidden></p>
+
+    <section id="ambiente" class="section" aria-labelledby="environment-title">
+      <div class="environment-heading">
+        <div><p class="eyebrow">MONITOREO EN TIEMPO REAL</p><h2 id="environment-title">El ambiente de tu cava</h2><p>Lecturas del DHT22 simulado en el ESP32</p></div>
+        <div class="update-summary"><span id="freshness-badge" class="badge" data-tone="muted"><span class="status-dot"></span><span id="freshness-text">Esperando telemetría</span></span><span class="update-time"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-clock"/></svg>Última actualización: <time id="updated-at">Sin fecha</time></span></div>
+      </div>
+      <div class="metrics-grid">
+        <article id="temperature-card" class="card metric-card" data-tone="muted" aria-labelledby="temperature-title">
+          <div class="card-top"><div class="metric-label"><span class="icon-tile"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-thermo"/></svg></span><h3 id="temperature-title">Temperatura</h3></div><span id="temperature-state" class="badge" data-tone="muted" role="status">Esperando datos</span></div>
+          <p class="metric-reading"><span id="temperature-value">—</span><span class="metric-unit">°C</span></p>
+          <p class="metric-caption">Temperatura de la zona de crianza</p>
+          <div class="range-meter temperature-meter" aria-hidden="true"><span class="ideal-band"></span><span id="temperature-marker" class="range-marker" hidden></span></div>
+          <div class="range-labels" aria-hidden="true"><span>0 °C</span><span>12–18 °C · ideal</span><span>35 °C</span></div>
+          <div class="metric-rule"><span>Ideal <strong>12–18 °C</strong></span><span>Crítica <strong>&gt; 22 °C</strong></span></div>
+          <p id="temperature-error" class="field-error" role="alert" hidden></p>
+        </article>
+        <article id="humidity-card" class="card metric-card" data-tone="muted" aria-labelledby="humidity-title">
+          <div class="card-top"><div class="metric-label"><span class="icon-tile"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-drop"/></svg></span><h3 id="humidity-title">Humedad relativa</h3></div><span id="humidity-state" class="badge" data-tone="muted" role="status">Esperando datos</span></div>
+          <p class="metric-reading"><span id="humidity-value">—</span><span class="metric-unit">%</span></p>
+          <p class="metric-caption">Humedad del ambiente de crianza</p>
+          <div class="range-meter humidity-meter" aria-hidden="true"><span class="ideal-band"></span><span id="humidity-marker" class="range-marker" hidden></span></div>
+          <div class="range-labels" aria-hidden="true"><span>0 %</span><span>65–80 % · ideal</span><span>100 %</span></div>
+          <div class="metric-rule"><span>Ideal <strong>65–80 %</strong></span><span>Crítica <strong>&lt; 60 %</strong></span></div>
+          <p id="humidity-error" class="field-error" role="alert" hidden></p>
+        </article>
+      </div>
+      <p id="timestamp-error" class="field-error" role="alert" hidden></p>
+      <p class="section-note"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-info"/></svg>Los rangos ideales y los umbrales críticos son distintos. El dashboard informa estas condiciones; no genera órdenes automáticas.</p>
+    </section>
+
+    <section id="climatizador" class="section" aria-labelledby="actuator-title">
+      <div class="section-heading"><div><p class="eyebrow">CONTROL Y CONFIRMACIÓN</p><h2 id="actuator-title">Climatizador</h2></div><span class="section-tag">Actuador · GPIO 2</span></div>
+      <div class="control-grid">
+        <article class="card control-card" aria-labelledby="manual-title">
+          <div class="card-top"><h3 id="manual-title">Control manual</h3><span class="small-label">OPERADOR</span></div>
+          <p class="card-description">Enviá una orden al ESP32. El estado confirmado se actualiza cuando la placa informa el estado aplicado.</p>
+          <div id="control-buttons" class="command-buttons" aria-busy="false">
+            <button id="command-on" class="button button-primary" data-command="on" type="button" disabled><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-power"/></svg><span>ENCENDER</span></button>
+            <button id="command-off" class="button button-secondary" data-command="off" type="button" disabled><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-power"/></svg><span>APAGAR</span></button>
+          </div>
+          <p id="control-policy" class="helper">Esperando conexión con Firebase.</p>
+          <p id="write-message" class="write-message" role="status" aria-live="polite" hidden></p>
+          <dl class="control-facts"><div><dt>Estado solicitado</dt><dd id="requested-value">Desconocido</dd></div><div><dt>Origen de la orden</dt><dd id="origin-value">Sin datos</dd></div></dl>
+          <p id="control-error" class="field-error" role="alert" hidden></p>
+        </article>
+        <article class="card confirmed-card" aria-labelledby="confirmed-title">
+          <div class="card-top"><h3 id="confirmed-title">Estado confirmado</h3><span class="small-label">ESP32 · ACK</span></div>
+          <div class="actuator-state"><span id="confirmed-icon" class="actuator-icon" data-tone="muted"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-fan"/></svg></span><div><p id="confirmed-value" class="confirmed-value">Estado desconocido</p><p class="helper">Último estado informado por la placa</p></div></div>
+          <div id="ack-box" class="ack-box" data-tone="muted" role="status"><span class="status-dot"></span><div><p id="ack-title">Esperando confirmación</p><p id="ack-detail">Todavía no se recibió un estado solicitado y confirmado válido.</p></div></div>
+          <p id="confirmed-error" class="field-error" role="alert" hidden></p>
+        </article>
+      </div>
+    </section>
+
+    <section id="supervision" class="section" aria-labelledby="supervisor-title">
+      <div class="section-heading"><div><p class="eyebrow">INTELIGENCIA Y CALIDAD</p><h2 id="supervisor-title">Supervisión AIoT</h2></div><span id="supervisor-status" class="badge" data-tone="muted">Supervisor IA pendiente de integración</span></div>
+      <article class="card supervisor-card">
+        <div class="supervisor-overview"><span class="icon-tile"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-shield"/></svg></span><div><h3>Una mirada sobre la calidad de crianza</h3><p>Registros existentes en Firebase. Gemini todavía no está integrado; este panel no genera evaluaciones ni decisiones.</p></div></div>
+        <div class="supervisor-grid">
+          <div class="supervisor-fact"><h4>Alerta de calidad</h4><p id="alert-value" class="supervisor-value" data-tone="muted">Sin datos</p><p>Valor registrado por el supervisor</p></div>
+          <div class="supervisor-fact"><h4>Forzar climatización</h4><p id="forced-value" class="supervisor-value" data-tone="muted">Sin datos</p><p>Lectura informativa; no envía órdenes</p></div>
+          <div class="supervisor-fact impact"><h4>Impacto enológico</h4><p id="impact-value">Sin descripción registrada</p></div>
+        </div>
+        <div class="evaluation-line"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-clock"/></svg><span>Última evaluación: <time id="evaluation-value">Sin evaluación registrada</time></span></div>
+        <ul id="supervisor-errors" class="field-error" role="alert" hidden></ul>
+      </article>
+    </section>
+
+    <aside class="security-note" aria-label="Seguridad del control manual"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-shield"/></svg><p><strong>Entorno local de desarrollo.</strong> Antes de publicar controles de escritura, implementá Firebase Authentication y reglas de acceso por usuario. En un host distinto de localhost este dashboard habilita solo lectura; esa restricción de interfaz no reemplaza las reglas de Firebase.</p></aside>
+    <footer class="page-footer"><span>Cava Inteligente · Sistema AIoT</span><span>Unidad 4 <span aria-hidden="true">/</span> Dashboard · Paso 7</span></footer>
+  </main>
+</body>
+</html>
