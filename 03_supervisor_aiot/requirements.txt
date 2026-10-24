@@ -1,5 +1,9 @@
-fastapi
-uvicorn
-firebase-admin
-python-dotenv
-google-genai
+fastapi==0.162.0
+uvicorn==0.54.0
+firebase-admin==7.7.0
+google-genai==2.33.0
+pydantic==2.14.1
+python-dotenv==1.2.4
+pytest==9.1.1
+pytest-asyncio==1.4.0
+httpx==0.28.1
