@@ -1,5 +1,6 @@
 #include "firebase_sse.h"
 #include "sse_parser.h"
+#include "diagnostico_red.h"
 
 #include <Arduino.h>
 #include <WiFi.h>
@@ -45,6 +46,12 @@ bool redPreparada() {
   return WiFi.status() == WL_CONNECTED && time(nullptr) >= config.horaMinima;
 }
 
+void cerrarStream(WiFiClientSecure& cliente) {
+  diagnosticarHeap("SSE", "antes-cierre");
+  cliente.stop();
+  diagnosticarHeap("SSE", "tras-cierre");
+}
+
 ConexionSse abrirStream(WiFiClientSecure& cliente) {
   char url[cava::MAX_URL_SSE];
   if (strlen(config.url) >= sizeof(url)) return {};
@@ -63,11 +70,21 @@ ConexionSse abrirStream(WiFiClientSecure& cliente) {
     cliente.setCACert(config.ca);
     cliente.setHandshakeTimeout(config.timeoutTlsSegundos);
     cliente.setTimeout(config.timeoutHttpMs);
-    if (!cliente.connect(destino.host, 443, config.timeoutConexionMs)) {
-      char detalle[80] = {};
-      const int error = cliente.lastError(detalle, sizeof(detalle));
-      detalle[sizeof(detalle) - 1] = '\0';
+    diagnosticarRed("SSE", config.horaMinima);
+    diagnosticarDns("SSE", destino.host);
+    diagnosticarHeap("SSE", "antes-TLS");
+    const unsigned long inicioTls = millis();
+    const bool conectadoTls = cliente.connect(destino.host, 443, config.timeoutConexionMs);
+    // lastError pertenece a este intento y se lee antes de otros diagnósticos.
+    char detalle[80] = {};
+    const int error = conectadoTls ? 0 : cliente.lastError(detalle, sizeof(detalle));
+    detalle[sizeof(detalle) - 1] = '\0';
+    Serial.printf("[SSE] [TLS] conectado=%s tiempo=%lu ms\n",
+                  conectadoTls ? "si" : "no", millis() - inicioTls);
+    diagnosticarHeap("SSE", "tras-TLS");
+    if (!conectadoTls) {
       avisar("[SSE] Error de conexion/TLS %d: %s", error, detalle);
+      diagnosticarRed("SSE", config.horaMinima);
       return {};
     }
 
@@ -110,6 +127,7 @@ ConexionSse abrirStream(WiFiClientSecure& cliente) {
         return {};
       }
       avisar("[SSE] HTTP 307 - Siguiendo redireccion HTTPS con validacion TLS");
+      cerrarStream(cliente);
       strcpy(url, siguiente);
       continue;
     }
@@ -141,7 +159,7 @@ void escucharFirebase(void* parametro) {
     const unsigned long ahora = millis();
     if (!redPreparada()) {
       if (conectado) {
-        clienteSse.stop();
+        cerrarStream(clienteSse);
         conectado = false;
         ultimoCierre = ahora;
         espera = REINTENTO_SSE_MS;
@@ -156,7 +174,7 @@ void escucharFirebase(void* parametro) {
       avisar("[SSE] Conectando con Firebase...");
       const ConexionSse conexion = abrirStream(clienteSse);
       if (!conexion.establecida) {
-        clienteSse.stop();
+        cerrarStream(clienteSse);
         ultimoCierre = millis();
         espera = conexion.permisoDenegado ? REINTENTO_MAXIMO_MS : siguienteEspera;
         siguienteEspera = siguienteEspera < REINTENTO_MAXIMO_MS / 2 ? siguienteEspera * 2 : REINTENTO_MAXIMO_MS;
@@ -169,8 +187,7 @@ void escucharFirebase(void* parametro) {
       cuerpo.reiniciar(conexion.chunked);
       ultimaActividad = millis();
       avisar("[SSE] HTTP 200 - Streaming establecido");
-      avisar("[SSE] Heap libre: %u bytes | Minimo: %u bytes",
-             static_cast<unsigned>(ESP.getFreeHeap()), static_cast<unsigned>(ESP.getMinFreeHeap()));
+      diagnosticarHeap("SSE", "stream-activo");
     }
 
     bool cerrar = false;
@@ -214,7 +231,7 @@ void escucharFirebase(void* parametro) {
       cerrar = true;
     }
     if (cerrar) {
-      clienteSse.stop();
+      cerrarStream(clienteSse);
       conectado = false;
       ultimoCierre = millis();
     }

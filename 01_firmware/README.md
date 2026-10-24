@@ -1,9 +1,10 @@
-# Firmware ESP32 — PASOS 3, 4 y 5
+# Firmware ESP32 — PASOS 3 a 6
 
 El ESP32 físico simula un DHT22, mantiene el control manual del climatizador y
 publica las lecturas válidas en Firebase Realtime Database mediante HTTPS PATCH.
 Además, recibe órdenes reactivas por SSE desde una conexión HTTPS persistente
-independiente y sincroniza GPIO 2 con `extractor_solicitado`.
+independiente y sincroniza GPIO 2 con `extractor_solicitado`. Después de aplicar
+cada orden, confirma el estado local en `extractor_confirmado` mediante HTTPS PUT.
 La simulación se ejecuta en la placa; no requiere un sensor conectado ni una
 librería DHT.
 
@@ -76,6 +77,8 @@ La telemetría local continúa cada **2500 ms**. El actuador se controla con `E`
 y `A`, sin depender del escenario ni de la conexión a Internet. Estos comandos
 no cambian `extractor_solicitado` en Firebase: una nueva orden SSE, incluido el
 estado inicial tras reconectar, vuelve a sincronizar la salida con Firebase.
+Son controles locales de prueba: sí actualizan `extractor_confirmado` mediante
+ACK, por lo que ambos booleanos pueden diferir hasta la siguiente orden remota.
 
 ## Wi-Fi, hora y TLS
 
@@ -103,9 +106,9 @@ verificados desde el [repositorio de Google Trust Services](https://pki.goog/rep
 y volver a cargar el firmware. Las CA públicas no son contraseñas ni claves
 privadas.
 
-## Envíos a Firebase
+## Telemetría a Firebase mediante PATCH
 
-La ruta utilizada es exclusivamente:
+La ruta utilizada para las lecturas ambientales es:
 
 ```text
 https://unidad4-aiot-cava-default-rtdb.firebaseio.com/bodega/zona_crianza/ambiente.json
@@ -135,12 +138,14 @@ temperatura y humedad con `isnan()`. En el escenario `9` aparece
 Una petición con una muestra válida ya iniciada puede terminar después de
 seleccionar `9`. Los nuevos envíos se recuperan al seleccionar `1`, `2` o `3`.
 
-HTTPS se ejecuta en una tarea FreeRTOS con una copia de la muestra. El bucle
-principal mantiene los comandos serie, GPIO 2, Wi-Fi y las lecturas locales.
+HTTPS se ejecuta en una tarea FreeRTOS con una copia de la muestra. Desde el
+PASO 6 esta misma tarea serializa PATCH y PUT, con prioridad para ACK cuando
+está listo para enviar. El bucle principal mantiene los comandos serie, GPIO 2,
+Wi-Fi y las lecturas locales.
 La conexión TCP y la espera HTTP tienen límites de 3000 ms; el handshake TLS
 tiene un límite de 4 segundos. Si un envío sigue en curso al vencer el próximo
-intervalo, se omite ese turno: no se acumulan peticiones ni se reenvían muestras
-antiguas. También se omiten turnos sin Wi-Fi o sin hora válida. El próximo
+intervalo, o hay un ACK listo, se omite ese turno: no se acumulan peticiones ni
+se reenvían muestras antiguas. También se omiten turnos sin Wi-Fi o sin hora válida. El próximo
 intento se realiza al vencer otro intervalo de 5000 ms.
 
 ## Comprobar en la placa y Firebase
@@ -159,8 +164,8 @@ intento se realiza al vencer otro intervalo de 5000 ms.
 5. Buscar los mensajes de cada solicitud:
 
    ```text
-   [FIREBASE] Enviando telemetria...
-   [FIREBASE] HTTP 200 - Datos enviados correctamente
+   [PATCH] Enviando telemetria...
+   [PATCH] HTTP 200 - Datos enviados correctamente
    ```
 
 6. En **Firebase Console → Realtime Database → Datos**, abrir
@@ -203,8 +208,9 @@ No se consulta periódicamente el booleano. Solo se hace otro GET al abrir o
 recuperar el stream, o al seguir una redirección HTTP 307.
 
 `firebase_sse.cpp` mantiene una única tarea y un cliente `WiFiClientSecure`
-exclusivos. El cliente PATCH existente conserva su tarea y su intervalo de
-5000 ms. La apertura TLS y los reintentos de SSE no se ejecutan en `loop()`.
+exclusivos. La tarea de escrituras conserva el intervalo PATCH de 5000 ms y
+ahora atiende también los PUT. La apertura TLS y los reintentos de SSE no se
+ejecutan en `loop()`.
 Las órdenes pasan al bucle principal mediante una cola que conserva el último
 booleano recibido; los avisos tienen una cola separada y acotada.
 
@@ -221,7 +227,7 @@ Se admiten `put` y `patch` con `path` exactamente `/` y `data` de tipo booleano.
 objetos, rutas distintas, campos duplicados y JSON inválido; se informa el error
 y se conserva la salida actual. El estado inicial recibido al conectar también
 se aplica. Si coincide con el estado local, se confirma por serie sin volver a
-escribir innecesariamente el pin.
+escribir innecesariamente el pin; desde el PASO 6 también registra un ACK nuevo.
 
 El parser acumula líneas hasta la línea vacía que termina un evento. Admite
 LF, CRLF, CR, varias líneas `data:` y fragmentación en cualquier byte. También
@@ -253,7 +259,8 @@ redirigidas, parámetros de autorización ni el contenido de eventos de error.
 
    Puede aparecer antes un HTTP 307. Debe seguirse hasta establecer el stream.
    Los permisos temporales de desarrollo deben permitir **leer** el nodo de
-   control, además de escribir el nodo ambiental del PASO 4.
+   control, además de escribir el nodo ambiental del PASO 4 y
+   `extractor_confirmado` para el PASO 6.
 3. En **Firebase Console → Realtime Database → Datos**, abrir
    `bodega/zona_crianza/control/extractor_solicitado`. Si falta, crear esa clave
    como **booleano** con valor `false`. No escribir la cadena `"false"`.
@@ -293,8 +300,9 @@ redirigidas, parámetros de autorización ni el contenido de eventos de error.
 - Al recuperar la conexión, Firebase entrega otra vez el estado inicial, que
   vuelve a sincronizar GPIO 2. No se reconstruye un historial de órdenes perdidas.
 - Se liberan los recursos TLS al cerrar. No se crean tareas nuevas por evento
-  ni por reconexión. La tarea SSE reserva 12288 bytes de pila; la tarea PATCH
-  existente mantiene sus 8192 bytes. Las colas y los buffers tienen límites fijos.
+  ni por reconexión. La tarea SSE reserva 12288 bytes de pila; la tarea de
+  escrituras PATCH/PUT mantiene sus 8192 bytes. Las colas y los buffers tienen
+  límites fijos.
 
 Para probar la recuperación, apagar y restaurar el punto de acceso Wi-Fi.
 Comprobar los mensajes de pérdida/reintento, un nuevo streaming HTTP 200, la
@@ -310,23 +318,336 @@ física no se pueden acreditar con pruebas en PC.
 
 Las pruebas de protocolo están en `tests/test_sse.cpp`: cubren eventos
 fragmentados, `put`/`patch`, JSON inválido, límites, chunked y redirecciones.
-No requieren credenciales ni abren conexiones. La confirmación remota mediante
-`extractor_confirmado` y HTTPS PUT corresponde al **PASO 6** y no se implementa aquí.
+No requieren credenciales ni abren conexiones.
 
-## Verificación de compilación del PASO 5
+## PASO 6: Acknowledge del actuador mediante PUT
 
-Se compiló y enlazó el sketch con sus dos módulos SSE, Arduino Core ESP32
+Acknowledge (ACK) es la confirmación de que el firmware aplicó una orden al GPIO.
+Refleja el estado aplicado por el programa; no mide eléctricamente el extractor.
+
+| Nodo bajo `/bodega/zona_crianza` | Significado | Operación del ESP32 |
+| --- | --- | --- |
+| `control/extractor_solicitado` | Estado pedido desde Firebase | Recibe booleanos por SSE; no escribe este nodo. |
+| `extractor_confirmado` | Último estado aplicado que Firebase aceptó | Escribe un booleano mediante HTTPS PUT. |
+| `ambiente` | Temperatura, humedad y timestamp | Conserva HTTPS PATCH cada 5000 ms, sujeto a disponibilidad. |
+
+El endpoint de confirmación existente es:
+
+```text
+https://unidad4-aiot-cava-default-rtdb.firebaseio.com/bodega/zona_crianza/extractor_confirmado.json
+```
+
+Se envía `Content-Type: application/json`. El cuerpo contiene únicamente `true`
+o `false`, sin comillas JSON ni un objeto envolvente. Firebase permite guardar
+booleanos con PUT en una ruta concreta; ver su
+[documentación de escritura REST](https://firebase.google.com/docs/database/rest/save-data#writing_data_with_put).
+No se cambia la estructura de la base ni se escriben nodos padres.
+
+El orden de ejecución es: validar la orden SSE como booleano, aplicar GPIO 2,
+actualizar el estado local, registrar la confirmación pendiente, programar PUT
+y verificar su resultado. El pin cambia antes de cualquier operación HTTPS y
+el control local funciona incluso sin Internet. Cuando la orden coincide con
+la salida actual no se repite la conmutación, pero sí se registra la confirmación.
+
+`firebase_ack.h/.cpp` conserva el último estado aplicado, una versión local de
+64 bits y el temporizador de reintento. El `.ino` coordina GPIO, las colas y una
+sola tarea HTTPS de escrituras; reutiliza CA y límites de tiempo del PATCH.
+Las versiones viajan solo entre tareas, no se agregan a Firebase. Si se aplica
+otra orden durante un PUT, su respuesta solo puede resolver la versión enviada:
+el objetivo nuevo permanece pendiente. Puede observarse transitoriamente el
+valor anterior en Firebase mientras finaliza la petición; el siguiente PUT
+publica el último estado aplicado. No se acumula un historial de estados viejos.
+
+SSE conserva su propio cliente TLS y su tarea, con diagnósticos de red/memoria. La tarea de
+escrituras crea un cliente distinto y lo cierra al terminar cada PATCH o PUT;
+jamás usa ni cierra el cliente SSE. Hay como máximo dos conexiones del firmware:
+el stream y una escritura. Si ya hay un PATCH en curso se espera su resultado
+sin bloquear `loop()`; al quedar libre la tarea se atiende primero el ACK listo.
+Mientras un ACK espera su intervalo de reintento pueden continuar los PATCH.
+Los turnos PATCH ocupados se omiten, como en el PASO 4: no se garantiza un PATCH
+exitoso cada 5 segundos durante fallos o muchas órdenes seguidas.
+
+Solo **HTTP 200** resuelve satisfactoriamente una confirmación. Ante un error,
+el GPIO conserva su estado y el ACK permanece en RAM:
+
+- Error de red/TLS, HTTP inesperado o imposibilidad de iniciar HTTPS: reintento
+  a los **5000 ms** de procesar el fallo, si hay Wi-Fi y hora válida.
+- HTTP **401/403**: muestra el código y pide revisar reglas de seguridad o
+  autenticación en `extractor_confirmado`; reintenta a los **60000 ms**.
+- Una nueva orden aplicada reemplaza el objetivo y permite enviar ese nuevo
+  estado en cuanto la tarea esté libre, sin esperar el reintento anterior.
+
+Las esperas se calculan con `millis()` y resta sin signo. No hay `delay()` ni
+solicitudes HTTPS dentro de `loop()`. Se conservan los límites TCP/HTTP de
+3000 ms y TLS de 4 segundos en la tarea de escrituras. Las colas tienen un
+elemento; la tarea espera suspendida cuando no hay trabajo.
+
+En el arranque GPIO 2 comienza en `LOW`. El primer booleano SSE registra un ACK
+incluso si es `false`, para corregir un confirmado remoto antiguo. Cada reconexión
+SSE repite esa sincronización inicial. Si `loop()` detecta pérdida de Wi-Fi,
+también deja pendiente el estado aplicado para publicarlo al volver la red.
+Una orden inicial posterior puede sustituirlo. Un reinicio no conserva pendientes
+en Flash: vuelve al arranque seguro y a la sincronización del stream.
+
+## Probar ACK en Arduino IDE y Firebase
+
+1. Mantener `secrets.h` sin cambios. Abrir `cava_esp32/cava_esp32.ino` con todos
+   sus `.cpp` y `.h`, incluido `firebase_ack`. Seleccionar **ESP32 Dev Module**,
+   Core **3.3.11**, el puerto CH340, **Verificar** y **Subir**. Abrir el monitor
+   serie a **115200 baudios** y esperar Wi-Fi, NTP y streaming HTTP 200.
+2. En Firebase Console → Realtime Database → Datos, abrir los dos nodos del
+   actuador de la tabla anterior. Los permisos actuales deben permitir leer la
+   orden y escribir `extractor_confirmado`. El firmware no cambia reglas ni autenticación.
+3. Cambiar `control/extractor_solicitado` de `false` a **booleano `true`**.
+   Comprobar el LED azul encendido y esta secuencia, que puede intercalarse con
+   otros mensajes:
+
+   ```text
+   [SSE] Orden recibida: ENCENDER
+   [ACTUADOR] GPIO 2 = ON
+   [ACK] Enviando confirmacion: true
+   [ACK] HTTP 200 - Estado confirmado en Firebase
+   ```
+
+   Verificar `extractor_confirmado = true` como booleano, sin comillas.
+4. Cambiar la orden a **booleano `false`**. Comprobar el LED apagado:
+
+   ```text
+   [SSE] Orden recibida: APAGAR
+   [ACTUADOR] GPIO 2 = OFF
+   [ACK] Enviando confirmacion: false
+   [ACK] HTTP 200 - Estado confirmado en Firebase
+   ```
+
+   Verificar `extractor_confirmado = false`. Tras cada éxito también se muestran
+   el valor enviado y el heap libre/mínimo.
+5. Probar sincronización inicial: con la placa apagada, dejar solicitado `false`
+   y confirmado `true`; encenderla. Debe permanecer apagado el LED y corregirse
+   confirmado a `false` con PUT. Repetir con solicitado `true` y confirmado
+   `false`: el LED debe arrancar apagado y encenderse al recibir SSE.
+6. Probar `E` y `A`: deben aplicar GPIO y confirmar su estado. Son pruebas locales;
+   no cambian `extractor_solicitado`. Para retomar el control remoto, cambiar ese
+   booleano o reconectar SSE. Repetir con escenario `9`: se omiten PATCH por
+   `NAN`, pero órdenes, consola y ACK siguen operativos.
+7. Apagar temporalmente el punto de acceso Wi-Fi, enviar `E`/`A` y restaurarlo.
+   El control local debe responder sin red. Tras recuperar Wi-Fi y SSE, verificar
+   que confirmado converja al último estado aplicado; la nueva orden inicial
+   remota puede reemplazar la prueba local. El fallo no debe conmutar el GPIO.
+8. Si se recibe HTTP 401/403, comprobar el error `[ACK]`, la espera de 60 s y que
+   siga respondiendo el LED. Conservar las reglas y credenciales actuales durante
+   este diagnóstico. Una respuesta HTTP acredita que se alcanzó Firebase; es un
+   caso distinto del fallo de conexión `-1`.
+9. Alternar la orden mientras hay una escritura en curso. Al estabilizarla,
+   confirmar que LED y `extractor_confirmado` coincidan con el último estado
+   aplicado. Comprobar que los mensajes `[PATCH] HTTP 200` y `ambiente/timestamp`
+   continúen actualizándose con lecturas válidas. Un PUT no debe provocar un
+   nuevo `[SSE] Conectando...` en un stream sano.
+
+`[ACK]` identifica PUT del actuador; `[PATCH]` identifica telemetría. `[SSE]`
+identifica recepción de órdenes. El HTTP 200 del stream o de un PATCH no acredita
+un ACK: deben verse el **HTTP 200 de `[ACK]`** y el booleano actualizado.
+El valor confirmado puede quedar antiguo durante una desconexión o un PUT fallido.
+
+## Verificación de compilación y pruebas del PASO 6
+
+Se compiló y enlazó el sketch con sus cuatro módulos `.cpp`, Arduino Core ESP32
 **3.3.11** y el compilador Xtensa instalado, sin advertencias en el código del
 proyecto. También se generó la imagen ESP32 con esptool, sin cargarla en la placa.
 
 | Recurso | Uso medido | Referencia ESP32 Dev Module |
 | --- | --- | --- |
-| Flash según las secciones de la receta Arduino | 1048352 bytes (80,0 %) | Partición de aplicación predeterminada: 1310720 bytes |
-| RAM estática | 48592 bytes (14,8 %) | Máximo informado por la placa: 327680 bytes |
-| Imagen `.bin` generada | 1048496 bytes | Incluye encabezados y alineación de la imagen |
+| Flash según las secciones de la receta Arduino | 1067400 bytes (81,4 %) | Partición de aplicación predeterminada: 1310720 bytes |
+| RAM estática | 49064 bytes (15,0 %) | Máximo informado por la placa: 327680 bytes |
+| Imagen `.bin` generada | 1067552 bytes | Incluye encabezados y alineación de la imagen |
 
 La RAM estática no incluye el heap de Wi-Fi, TLS, las colas ni las pilas de tareas.
 La comprobación de esos picos requiere observar el heap mínimo en la placa real.
-Pasaron pruebas en PC de protocolo, redirecciones, reconexión temporizada y
-conservación de las funciones de los PASOS 3 y 4, con red simulada. Esto no acredita
-que el PASO 5 ya haya recibido órdenes desde Firebase en el ESP32 físico.
+Pasaron pruebas en PC de protocolo SSE, redirecciones, reconexión temporizada,
+versiones ACK, errores HTTP y conservación de las funciones de los PASOS 3 a 5.
+La integración con red simulada mantuvo un solo GET SSE durante cuatro PUT y
+dos PATCH en 12 segundos; comprobó booleanos reales en el cuerpo, prioridad ACK,
+respuestas antiguas, comandos locales y recuperación. No se contactó Firebase
+para estas pruebas ni se cargó el firmware en la placa.
+
+El PASO 5 ya fue comprobado físicamente por el usuario. La compilación y estas
+pruebas **no acreditan todavía el funcionamiento físico del ACK del PASO 6**.
+
+La prueba de versiones y reintentos es reproducible sin Arduino ni credenciales,
+desde `01_firmware`:
+
+```bash
+g++ -std=c++17 -Wall -Wextra -Werror -Icava_esp32 tests/test_ack.cpp cava_esp32/firebase_ack.cpp -o /tmp/cava-test-ack
+/tmp/cava-test-ack
+```
+
+Comprueba sincronización aun con un estado igual, órdenes sucesivas durante una
+confirmación, errores de red/HTTP, espera de 5 s o 60 s, reemplazo del objetivo
+y desbordamiento de `millis()`. Solo HTTP 200 elimina el pendiente actual.
+
+## Diagnóstico del fallo HTTPS observado después del PASO 6
+
+La comparación se hizo contra el PASO 5 (`743348f`); el PASO 6 estaba en cambios
+locales sin commit y se conservó. No se identificó una causa raíz demostrable
+con los mensajes disponibles. Esta versión agrega instrumentación para medirla
+en el ESP32 físico; **no acredita que el problema esté resuelto**.
+
+La revisión del firmware y del código instalado del Core **3.3.11** encontró:
+
+- El stream SSE usa una conexión TLS persistente exclusiva. PATCH y ACK usan
+  una sola tarea de escrituras y un cliente nuevo por solicitud; no se crean
+  tres conexiones simultáneas por agregar ACK. El máximo sigue siendo dos.
+- El orden de declaración ya era correcto en el PASO 5 y en el PASO 6:
+  `WiFiClientSecure cliente` antes de `HTTPClient http`. C++ destruye primero
+  `http`, mientras `cliente` sigue vivo. No se encontró una referencia a un
+  cliente destruido ni un objeto HTTPClient global reutilizado.
+- En este core, `end()` puede conservar el puntero al cliente si la conexión
+  ya falló. Por eso se conserva ese orden y se delimita explícitamente el
+  ámbito de ambos objetos. Se ejecutan `http.end()` y `cliente.stop()` incluso
+  si falla `begin()`, y se mide otra vez **después de ambos destructores**.
+  Es una mejora de limpieza/diagnóstico, no una causa demostrada del fallo.
+- El mismo cierre de PATCH y la misma conexión SSE existían antes de ACK.
+  El cambio de estado ACK usa almacenamiento fijo, colas acotadas y copias;
+  no agrega un cliente TLS ni una tarea por orden.
+- `HTTPClient` convierte un fallo de `connect()` en `-1` y lo describe como
+  `connection refused`. El `-1` del cliente seguro también puede originarse
+  en socket, conexión TCP o timeout, antes de verificar certificados. Esos
+  textos **no prueban un rechazo TCP del servidor ni un fallo de la CA**.
+  El timeout del handshake TLS de 4 s también devuelve `-1` en ese core;
+  se informa la duración para diferenciarlo de otros fallos sin asumir la causa.
+  Ver [HTTPClient 3.3.11](https://github.com/espressif/arduino-esp32/blob/3.3.11/libraries/HTTPClient/src/HTTPClient.cpp)
+  y [ssl_client 3.3.11](https://github.com/espressif/arduino-esp32/blob/3.3.11/libraries/NetworkClientSecure/src/ssl_client.cpp).
+
+SSE sigue redirecciones **307** HTTPS con validación de CA/hostname en cada salto,
+como requiere el [protocolo de Firebase](https://firebase.google.com/docs/database/rest/retrieve-data#section-rest-streaming).
+Las escrituras conservan el comportamiento anterior sin redirecciones automáticas:
+ahora se informa el código 3xx y si hay `Location`, sin imprimir su contenido ni
+convertir PATCH/PUT en GET. Una redirección produce una respuesta HTTP positiva,
+no explica por sí sola el `-1`. Los registros DNS muestran el host inicial de
+las escrituras y el host de cada salto SSE, que pueden ser distintos.
+
+### Registros agregados
+
+`diagnostico_red.h/.cpp` toma mediciones con las API del Core/ESP-IDF, sin
+reservar buffers grandes ni crear tareas de diagnóstico. Los siguientes son
+**formatos de salida**, no valores medidos en una placa:
+
+```text
+[DIAG] SSE=activo ACK=activo PATCH=activo | TLS con CA
+[PATCH] [RED] wifi=3 IP=... GW=... RSSI=... dBm DNS=.../...
+[PATCH] [NTP] UTC=... valida=si ultima_sync_epoch=...
+[PATCH] [DNS] host=... resultado=1 IP=... tiempo=... ms
+[PATCH] [HEAP] t=... antes-objetos | libre=... minimo=... mayor=... pila_min=... bytes
+[PATCH] [HEAP] t=... antes-TLS | libre=... minimo=... mayor=... pila_min=... bytes
+[PATCH] [HTTPS] codigo=... tiempo=... ms
+[PATCH] [HEAP] t=... tras-peticion | libre=... minimo=... mayor=... pila_min=... bytes
+[PATCH] [HEAP] t=... tras-cierre | libre=... minimo=... mayor=... pila_min=... bytes
+[PATCH] [HEAP] t=... tras-destruccion | libre=... minimo=... mayor=... pila_min=... bytes
+```
+
+ACK emite las mismas fases con `[ACK]`. SSE informa `antes-TLS`, `tras-TLS`,
+`stream-activo`, `antes-cierre` y `tras-cierre`, además de duración TLS, DNS,
+red y hora. El stream sano queda abierto; no se lo cierra para enviar escrituras.
+Las desconexiones STA informan también el código de motivo.
+
+- `libre`, `minimo` y `mayor` miden RAM **interna direccionable por byte**
+  (`MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT`), relevante para las asignaciones TLS.
+  No suman PSRAM ni bloques utilizables solo con accesos de 32 bits. El registro
+  previo de ACK exitoso que usa `ESP.getFreeHeap()` cuenta memoria interna con
+  otro filtro; para comparar fases usar los nuevos registros `[HEAP]`.
+- `minimo` es histórico desde el arranque: **no tiene que subir al cerrar TLS**.
+  `libre` y `mayor` deberían estabilizarse después de liberar cada escritura,
+  comparando con SSE en el mismo estado. Una caída sostenida requiere investigar
+  una fuga; mucho heap libre con un bloque mayor decreciente sugiere fragmentación.
+  Ninguno de esos síntomas está demostrado aún sin registros de la placa.
+- `pila_min` es el mínimo de pila libre de la tarea que emite el registro, en
+  bytes según ESP-IDF. Permite detectar falta de margen sin aumentar las pilas
+  a ciegas y consumir más heap.
+- `wifi=3` corresponde a `WL_CONNECTED`; comprobar también IP, gateway y RSSI.
+  Estar asociado al AP no garantiza acceso a Internet. DNS `resultado=1`
+  acredita una resolución en ese momento, no una conexión TCP/TLS exitosa.
+  La consulta adicional se hace solo en las tareas de red, nunca en `loop()`;
+  el cliente sigue conectando por hostname y puede usar la caché del resolvedor.
+- `valida=si` conserva el umbral de fecha para habilitar TLS; comprobar UTC
+  real. `ultima_sync_epoch=0` significa que el callback no observó todavía una
+  respuesta SNTP en este arranque. Un valor distinto de cero acredita que SNTP
+  notificó una sincronización; puede ser anterior a una reconexión Wi-Fi.
+
+Los diagnósticos agregan salida serie, una consulta DNS por intento y un pequeño
+costo de memoria/tiempo. Las mediciones antes/después no capturan todos los picos
+internos del handshake; el mínimo histórico ayuda a verlos. No se cambian los
+timeouts TCP/HTTP de 3000 ms ni el límite TLS de 4 s sin evidencia de la placa.
+
+### Aislar SSE y ACK sin cambiar secrets.h ni Firebase
+
+Las opciones están en `cava_esp32/diagnostico_red.h` y valen **0 por defecto**.
+También admiten `-D` para no editar archivos al alternar pruebas. Solo se permite
+desactivar un componente por vez:
+
+| Prueba | `CAVA_DIAG_SIN_SSE` | `CAVA_DIAG_SIN_ACK` | Funciones activas |
+| --- | --- | --- | --- |
+| Versión completa | 0 | 0 | SSE + PATCH + ACK |
+| Aislar SSE | 1 | 0 | PATCH + ACK; órdenes locales E/A |
+| Aislar ACK | 0 | 1 | SSE + PATCH; GPIO responde sin PUT |
+
+En Arduino IDE, cambiar solo el valor predeterminado de la opción correspondiente,
+verificar y cargar. En la prueba sin SSE, enviar **E y A** por el monitor serie
+para generar PUT: no llegan órdenes desde Firebase porque no se crea la tarea
+del stream. El PATCH conserva su turno cada 5000 ms en las tres variantes.
+
+Con `arduino-cli` disponible en PATH, desde la raíz del proyecto:
+
+```bash
+# Versión completa, ambas opciones en 0 en el archivo.
+arduino-cli compile --fqbn esp32:esp32:esp32 --warnings all --build-path /tmp/cava-build-completo 01_firmware/cava_esp32
+
+# Sin SSE, con PATCH y ACK.
+arduino-cli compile --fqbn esp32:esp32:esp32 --warnings all --build-path /tmp/cava-build-sin-sse --build-property compiler.cpp.extra_flags=-DCAVA_DIAG_SIN_SSE=1 01_firmware/cava_esp32
+
+# Sin ACK, con SSE y PATCH.
+arduino-cli compile --fqbn esp32:esp32:esp32 --warnings all --build-path /tmp/cava-build-sin-ack --build-property compiler.cpp.extra_flags=-DCAVA_DIAG_SIN_ACK=1 01_firmware/cava_esp32
+```
+
+Estas órdenes compilan; la carga se realiza después por el puerto de la placa.
+No se efectuó ninguna carga durante esta revisión. Se usó el Core 3.3.11 local.
+La compilación completa deja 278616 bytes del máximo de RAM estática informado
+por Arduino; **eso no es el heap libre real durante Wi-Fi/TLS**.
+
+Las tres compilaciones terminaron sin advertencias con `--warnings all`:
+
+| Variante | Flash (bytes) | RAM estática (bytes) |
+| --- | --- | --- |
+| Completa | 1067400 | 49064 |
+| Sin SSE | 1048376 | 49008 |
+| Sin ACK | 1067220 | 49064 |
+
+También pasaron las pruebas existentes `tests/test_ack.cpp` y
+`tests/test_sse.cpp` en PC. Estas verifican estados/protocolo; no reproducen
+los handshakes concurrentes ni el heap del ESP32.
+
+Para cada variante, reiniciar la placa y registrar desde el arranque al menos
+2 minutos con la misma red y escenario `1`. Mantener períodos sin cambiar
+órdenes para observar varios PATCH entre PUT. Verificar los HTTP 200 de cada
+operación y los nodos de Firebase, además del LED. Probar después `9` para
+`isnan()` y recuperación de Wi-Fi. Comparar siempre `tras-destruccion` con el
+stream en un estado equivalente.
+
+- Si solo funciona sin SSE, investigar recursos de la conexión persistente,
+  margen TLS y destino redirigido. Esto no prueba que se comparta un cliente.
+- Si solo funciona sin ACK, comparar memoria y tiempos al añadir escrituras,
+  frecuencia de órdenes y códigos HTTP específicos del PUT.
+- Si fallan ambas variantes, revisar primero DNS, IP/gateway, hora y errores
+  de socket antes de atribuir el problema a la coexistencia SSE/ACK.
+- Si ambas variantes funcionan y la completa falla, el problema depende de
+  su coexistencia o temporización; revisar mínimos y mayor bloque en ese caso.
+
+Si persiste `-1` sin detalle, seleccionar **Herramientas → Core Debug Level → Info**
+y recompilar/cargar (o usar `--fqbn esp32:esp32:esp32:DebugLevel=info`). Este nivel
+del core permite distinguir el timeout TCP de 3000 ms y errores de socket que
+el código genérico no discrimina. Conservar también los logs desde antes de
+la apertura SSE; un stream sano puede seguir conectado mientras falla otra
+conexión a un host diferente.
+
+Al terminar, restaurar **ambas opciones a 0**, recompilar y cargar la versión
+completa. El primer registro debe decir `SSE=activo ACK=activo PATCH=activo`.
+La confirmación final exige comprobar simultáneamente SSE real, GPIO 2,
+PATCH periódicos y PUT en el ESP32 físico con validación TLS activa.
