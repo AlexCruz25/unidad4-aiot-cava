@@ -11,6 +11,7 @@ from supervisor.rules import EnvironmentalRules
     (16, 70, "normal", None, 0), (24, 70, "critico", True, 1),
     (17, 55, "critico", True, 1), (24, 55, "critico", True, 2),
     (22, 70, "fuera_ideal", None, 0), (16, 60, "fuera_ideal", None, 0),
+    (22, 60, "fuera_ideal", None, 0),
     (12, 65, "normal", None, 0), (18, 80, "normal", None, 0),
 ])
 def test_environmental_thresholds(setup, temperature, humidity, state, action, count):
@@ -52,6 +53,29 @@ def test_hysteresis_holds_outside_ideal_and_resets_on_gap(setup):
     for _ in range(4):
         clock.advance(2)
         assert rules.evaluate(sample, control, clock.now()).segundos_estables == 0
+
+
+@pytest.mark.parametrize("temperature,humidity", [(20, 70), (16, 62)])
+def test_recovery_restarts_after_a_new_nonideal_measurement(setup, temperature, humidity):
+    clock, settings, *_ = setup
+    rules = EnvironmentalRules(settings)
+    control = ControlState(extractor_solicitado=True, origen="supervisor")
+    def evaluate(t=16, h=70):
+        return rules.evaluate(Measurement(temperatura=t, humedad=h, timestamp=clock.now()), control, clock.now())
+    evaluate()
+    for _ in range(11):
+        clock.advance(5)
+        assert evaluate().accion is None
+    clock.advance(5)
+    assert evaluate(temperature, humidity).accion is None
+    assert rules.recovery_start is None
+    clock.advance(5)
+    assert evaluate().segundos_estables == 0
+    for _ in range(11):
+        clock.advance(5)
+        assert evaluate().accion is None
+    clock.advance(5)
+    assert evaluate().accion is False
 
 
 @pytest.mark.parametrize("field,value", [

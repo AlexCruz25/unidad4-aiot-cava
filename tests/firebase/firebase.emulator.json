@@ -1,0 +1,10 @@
+{
+  "database": { "instance": "demo-cava-paso9", "rules": "database.proposed.rules.json" },
+  "emulators": {
+    "database": { "host": "127.0.0.1", "port": 9019 },
+    "hub": { "host": "127.0.0.1", "port": 4419 },
+    "logging": { "host": "127.0.0.1", "port": 4519 },
+    "ui": { "enabled": false },
+    "singleProjectMode": true
+  }
+}

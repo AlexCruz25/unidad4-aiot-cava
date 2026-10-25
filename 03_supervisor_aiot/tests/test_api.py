@@ -64,6 +64,14 @@ async def test_remote_peer_cannot_use_token_or_forwarded_header(setup):
         assert response.status_code == 403
 
 
+@pytest.mark.parametrize("token", [b"token-incorrecto", b"\xc3\xa1-token-no-ascii"], ids=["incorrecto", "no-ascii"])
+async def test_malformed_local_token_is_rejected_without_server_error(setup, token):
+    async with api(setup) as (client, runtime):
+        response = await client.post("/evaluar", json={}, headers=[(b"X-Local-Token", token)])
+        assert response.status_code == 403
+        assert runtime.repository.actions == runtime.repository.publications == []
+
+
 async def test_invalid_and_disconnected_firebase_return_controlled_errors(setup):
     async with api(setup) as (client, runtime):
         runtime.repository.zone["ambiente"] = None

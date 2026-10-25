@@ -42,6 +42,12 @@ int main() {
   assert(eventos[0].tipo == TipoSse::KeepAlive);
   assert(eventos[1].tipo == TipoSse::Cancel);
   assert(eventos[2].tipo == TipoSse::AuthRevoked);
+  // Un error de autorización/cancelación con apariencia de orden no acciona GPIO.
+  eventos = alimentar(parser, "event: cancel\ndata: {\"path\":\"/\",\"data\":true}\n\n"
+                             "event: auth_revoked\ndata: {\"path\":\"/\",\"data\":true}\n\n"
+                             "event: error\ndata: {\"path\":\"/\",\"data\":true}\n\n");
+  assert(eventos.size() == 2);
+  assert(eventos[0].tipo == TipoSse::Cancel && eventos[1].tipo == TipoSse::AuthRevoked);
   for (const auto& json : {
       "null", "true", "[]", "{}", "{\"path\":\"/\",\"data\":null}",
       "{\"path\":\"/\",\"data\":1}", "{\"path\":\"/\",\"data\":\"true\"}",

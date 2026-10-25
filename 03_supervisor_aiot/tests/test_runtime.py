@@ -86,6 +86,37 @@ async def test_cache_frequency_and_backoff(setup):
     await runtime.close()
 
 
+async def test_expired_ai_cache_requires_new_generation_but_not_repeated_calls(setup):
+    clock, settings, repo, analyzer, runtime = setup
+    repo.sample(24, 70)
+    await runtime.evaluate()
+    await finish_ai(runtime)
+    clock.advance(settings.gemini_cache_seconds - 1)
+    repo.sample(24, 70)
+    assert (await runtime.evaluate()).ia.estado == "disponible"
+    assert analyzer.calls == 1
+    clock.advance(2)
+    repo.sample(24, 70)
+    await runtime.evaluate()
+    await finish_ai(runtime)
+    assert analyzer.calls == 2
+    await runtime.evaluate()
+    assert analyzer.calls == 2
+    await runtime.close()
+
+
+async def test_concurrent_evaluations_issue_only_one_critical_order(setup):
+    _, settings, repo, analyzer, runtime = setup
+    settings.dry_run = False  # Solo repositorio simulado; nunca Firebase real.
+    repo.sample(24, 55)
+    await asyncio.gather(*(runtime.evaluate() for _ in range(12)))
+    await finish_ai(runtime)
+    assert repo.actions == [True]
+    assert analyzer.calls == 1
+    assert repo.zone["extractor_confirmado"] is False
+    await runtime.close()
+
+
 async def test_missing_invalid_old_data_never_act_and_reset_recovery(setup):
     clock, settings, repo, analyzer, runtime = setup
     settings.dry_run = False

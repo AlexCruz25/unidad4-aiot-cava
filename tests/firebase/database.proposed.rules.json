@@ -1,0 +1,47 @@
+{
+  "rules": {
+    ".read": false,
+    ".write": false,
+    "bodega": {
+      "zona_crianza": {
+        ".read": "auth != null && auth.uid === 'supervisor-cava' && auth.token.role === 'supervisor' && auth.token.zone === 'zona_crianza'",
+        "ambiente": {
+          ".read": "auth != null && auth.token.zone === 'zona_crianza' && (auth.token.role === 'operator' || auth.token.role === 'viewer')",
+          ".write": "auth != null && auth.uid === 'esp32-cava-01' && auth.token.role === 'device' && auth.token.zone === 'zona_crianza' && newData.exists()",
+          ".validate": "newData.hasChildren(['temperatura', 'humedad', 'timestamp'])",
+          "temperatura": { ".validate": "newData.isNumber() && newData.val() >= -40 && newData.val() <= 80" },
+          "humedad": { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 100" },
+          "timestamp": { ".validate": "newData.isNumber() && newData.val() >= now - 20000 && newData.val() <= now + 5000" },
+          "$other": { ".validate": false }
+        },
+        "control": {
+          ".read": "auth != null && auth.token.zone === 'zona_crianza' && (auth.token.role === 'operator' || auth.token.role === 'viewer')",
+          ".write": "auth != null && auth.token.zone === 'zona_crianza' && newData.exists() && ((auth.token.role === 'operator' && newData.child('origen').val() === 'manual') || (auth.uid === 'supervisor-cava' && auth.token.role === 'supervisor' && newData.child('origen').val() === 'supervisor'))",
+          ".validate": "newData.hasChildren(['extractor_solicitado', 'origen'])",
+          "extractor_solicitado": {
+            ".read": "auth != null && auth.uid === 'esp32-cava-01' && auth.token.role === 'device' && auth.token.zone === 'zona_crianza'",
+            ".validate": "newData.isBoolean()"
+          },
+          "origen": { ".validate": "newData.isString() && (newData.val() === 'manual' || newData.val() === 'supervisor')" },
+          "$other": { ".validate": false }
+        },
+        "extractor_confirmado": {
+          ".read": "auth != null && auth.token.zone === 'zona_crianza' && (auth.token.role === 'operator' || auth.token.role === 'viewer')",
+          ".write": "auth != null && auth.uid === 'esp32-cava-01' && auth.token.role === 'device' && auth.token.zone === 'zona_crianza' && newData.exists()",
+          ".validate": "newData.isBoolean()"
+        },
+        "supervisor": {
+          ".read": "auth != null && auth.token.zone === 'zona_crianza' && (auth.token.role === 'operator' || auth.token.role === 'viewer')",
+          ".write": "auth != null && auth.uid === 'supervisor-cava' && auth.token.role === 'supervisor' && auth.token.zone === 'zona_crianza' && newData.exists()",
+          ".validate": "newData.hasChildren(['alerta_calidad', 'forzar_climatizacion', 'impacto_enologico', 'ultima_evaluacion'])",
+          "alerta_calidad": { ".validate": "newData.isBoolean()" },
+          "forzar_climatizacion": { ".validate": "newData.isBoolean()" },
+          "impacto_enologico": { ".validate": "newData.isString() && newData.val().length >= 20 && newData.val().length <= 2048" },
+          "ultima_evaluacion": { ".validate": "newData.isString() && newData.val().matches(/^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,6})?Z$/)" },
+          "$other": { ".validate": false }
+        },
+        "$other": { ".validate": false }
+      }
+    }
+  }
+}

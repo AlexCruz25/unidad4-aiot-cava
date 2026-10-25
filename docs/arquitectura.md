@@ -1,45 +1,72 @@
-# Arquitectura del sistema AIoT
+# Arquitectura implementada
 
-Este documento describe la arquitectura inicial prevista para el sistema de control microclimático de una cava de crianza en barricas. Corresponde al Trabajo Práctico Integrador de la Unidad 4: Arquitectura AIoT y Sistemas Ciberfísicos.
+Unidad 4 · Cava de crianza · Pasos 1 a 8 implementados, Paso 9 en validación.
 
-El sistema se organizará como un sistema ciberfísico distribuido de lazo cerrado. Firebase Realtime Database será el punto de intercambio entre el dispositivo físico, el supervisor AIoT y el dashboard web. Los flujos descritos a continuación se implementarán en etapas posteriores.
-
-## Flujo de medición y visualización
-
-```text
-DHT22
-  ↓
-ESP32
-  ↓
-Firebase Realtime Database
-  ↓
-Dashboard Web
+```mermaid
+flowchart LR
+    SIM[DHT22 simulado en ESP32] --> ESP[ESP32 WROOM-32]
+    ESP -->|HTTPS PATCH /ambiente, turno 5 s| DB[(Firebase RTDB)]
+    DB -->|SSE persistente /control/extractor_solicitado| ESP
+    ESP -->|digitalWrite GPIO 2| LED[LED azul]
+    ESP -->|HTTPS PUT /extractor_confirmado después de aplicar| DB
+    DB -->|onValue en rutas específicas| WEB[Dashboard web]
+    WEB -->|update atómico de orden y origen manual| DB
+    DB -->|listener Admin /ambiente| API[Supervisor FastAPI local]
+    API -->|lectura de zona y reglas Python| RULES[Protección e histéresis]
+    RULES -->|transacción /control, si DRY_RUN=false| DB
+    API -->|análisis acotado, caché y backoff| GEM[Gemini JSON Schema]
+    GEM -->|validación Pydantic| API
+    API -->|update /supervisor, si DRY_RUN=false| DB
 ```
 
-El DHT22 medirá la temperatura y la humedad relativa de la cava. El ESP32 leerá esas mediciones y las enviará a Firebase Realtime Database. El dashboard web recibirá las actualizaciones mediante Firebase onValue y mostrará el estado ambiental.
+Todas las rutas siguientes dependen de `/bodega/zona_crianza`:
 
-## Flujo de supervisión, actuación y confirmación
+| Ruta | Emisor | Consumidores | Contrato |
+| --- | --- | --- | --- |
+| `ambiente` | ESP32 | Dashboard y supervisor | `temperatura`, `humedad` numéricas; `timestamp` servidor en ms |
+| `control` | Dashboard / supervisor | ESP32 y supervisor; Dashboard muestra el estado | `extractor_solicitado` booleano, `origen` manual/supervisor |
+| `extractor_confirmado` | ESP32 | Dashboard; supervisor lo puede leer al leer la zona | Booleano del estado aplicado |
+| `supervisor` | Supervisor | Dashboard | Dos booleanos, explicación y `ultima_evaluacion` ISO UTC |
 
-```text
-Firebase
-  ↓
-Supervisor AIoT con FastAPI
-  ↓
-Gemini
-  ↓
-Firebase
-  ↓
-ESP32
-  ↓
-Actuador GPIO 2
-  ↓
-Acknowledge
-  ↓
-Firebase y Dashboard
-```
+El firmware mantiene una tarea y un cliente TLS exclusivos para SSE. Otra tarea
+serializa PATCH y PUT, con prioridad para ACK y un cliente TLS nuevo por
+petición; cierra HTTP/TLS antes de liberar los objetos. El bucle local atiende
+serie, simulación, Wi-Fi, hora y GPIO. Un turno PATCH puede omitirse si no hay
+red/hora válida, la lectura es inválida o hay una escritura en curso; no se
+acumulan muestras antiguas. SSE se reconecta con espera creciente y valida TLS
+en cada salto HTTPS permitido. No consulta periódicamente la orden.
 
-El supervisor AIoT, desarrollado en Python con FastAPI, consultará las mediciones almacenadas en Firebase y enviará el contexto ambiental a Gemini para su análisis. El supervisor procesará la respuesta y registrará la orden de control en Firebase.
+Después de ejecutar `digitalWrite()` y actualizar el estado local se registra
+el ACK. Si el pin ya tenía el valor solicitado, no se vuelve a conmutar y sí
+se vuelve a confirmar. Sus versiones son internas: impiden que una respuesta
+antigua resuelva una confirmación nueva; no viajan a Firebase. Solo HTTP 200
+resuelve el ACK pendiente. Las caídas conservan el último estado aplicado.
 
-El ESP32 recibirá la orden y controlará el actuador asociado al GPIO 2. Después de aplicar la orden, el ESP32 generará una confirmación (acknowledge) y la registrará en Firebase. El dashboard visualizará esa confirmación para permitir el seguimiento de la orden.
+El Dashboard usa eventos `onValue()` y temporizadores locales para avisos de
+frescura y ACK; esos temporizadores no consultan Firebase. El control manual
+actual requiere localhost y conexión. Ese filtro en JavaScript no reemplaza
+autenticación ni reglas de servidor. `.info/connected` describe la conexión del
+navegador, no la presencia del ESP32.
 
-La confirmación indicará que el ESP32 aplicó la orden; las mediciones posteriores del DHT22 permitirán observar su efecto sobre el microclima y continuar el ciclo de control.
+El supervisor se ejecuta con un proceso, un lock de instancia y evaluaciones
+serializadas. El listener Admin avisa cambios de ambiente y se lee la zona
+para validar medición y control. No se utiliza un polling de órdenes. Primero
+se resuelven reglas y transacción; luego se inicia Gemini sin demorar la
+protección. La transacción conserva hijos existentes y aborta si el control
+cambió desde la lectura. Las muestras inválidas o antiguas no producen órdenes.
+Las respuestas IA atrasadas no se publican como estado actual.
+
+T>22 °C o HR<60 % requieren mitigación. Un encendido del supervisor solo se
+apaga tras 60 s continuos de muestras nuevas ideales, con intervalos admitidos;
+se respeta un encendido manual fuera de criticidad. Los booleanos publicados
+proceden de Python aunque la IA recomiende algo distinto. `DRY_RUN=true` evita
+las dos clases de escritura del supervisor, manteniendo evaluación/diagnóstico.
+
+El lazo confirma ejecución lógica y visualización, no un efecto microclimático
+físico: el DHT22 está simulado y GPIO 2 representa el actuador. La igualdad de
+dos booleanos sin timestamp/ID de orden tampoco demuestra un ACK nuevo.
+
+Las reglas desplegadas no están disponibles localmente. Los clientes actuales
+no implementan Firebase Auth y Admin usa privilegios elevados. La migración
+propuesta, sus límites y el emulador aislado se describen en
+[paso9-seguridad.md](paso9-seguridad.md); no se cambió la autenticación existente.

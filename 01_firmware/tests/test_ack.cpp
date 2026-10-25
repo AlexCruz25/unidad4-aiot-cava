@@ -33,7 +33,7 @@ int main() {
   ack.resolver(enviada, 200, 6);
   assert(!ack.preparar(6, enviada));
 
-  for (int error : {-1, 0, 204, 400, 401, 403, 500}) {
+  for (int error : {-1, -11, 0, 201, 204, 301, 307, 308, 400, 401, 403, 429, 500, 503}) {
     ack.registrar(false);
     assert(ack.preparar(100, enviada));
     ack.resolver(enviada, error, 100);

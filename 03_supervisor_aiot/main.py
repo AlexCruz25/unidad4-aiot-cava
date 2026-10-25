@@ -60,7 +60,8 @@ def create_app(settings: Settings | None = None, *, repository=None, analyzer=No
         configured = settings.local_api_token.get_secret_value() if settings.local_api_token else ""
         if len(configured) < 24:
             raise HTTPException(503, "Configurar LOCAL_API_TOKEN de al menos 24 caracteres para habilitar este endpoint")
-        if not token or not secrets.compare_digest(configured, token):
+        # compare_digest(str, str) rechaza caracteres no ASCII con TypeError.
+        if not token or not secrets.compare_digest(configured.encode("utf-8"), token.encode("utf-8")):
             raise HTTPException(403, "Token local inválido o ausente")
         runtime = request.app.state.supervisor
         result = await runtime.evaluate()

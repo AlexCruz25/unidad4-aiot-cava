@@ -25,3 +25,18 @@ secrets.h
 
 # Logs
 *.log
+
+# Credenciales y estado local del supervisor (no ignorar .env.example)
+03_supervisor_aiot/**/*.json
+03_supervisor_aiot/**/*.pem
+03_supervisor_aiot/**/*.key
+03_supervisor_aiot/credentials/
+03_supervisor_aiot/.runtime/
+**/*firebase-adminsdk*.json
+**/*service-account*.json
+**/*serviceAccount*.json
+.pytest_cache/
+
+# Dependencias locales de las pruebas de seguridad (Paso 9)
+tests/firebase/node_modules/
+firebase-admin.json
